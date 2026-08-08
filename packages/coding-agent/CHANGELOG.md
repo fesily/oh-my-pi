@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added built-in Windows native DAP adapter `dap-dbgeng` for local launch and attach-by-PID when the binary is on PATH.
+
 ## [17.2.11] - 2026-08-07
 
 ### Added

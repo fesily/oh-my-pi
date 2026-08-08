@@ -208,5 +208,25 @@
 		"attachDefaults": {
 			"request": "attach"
 		}
+	},
+	"dap-dbgeng": {
+		"command": "dap-dbgeng",
+		"args": [],
+		"languages": ["c", "cpp"],
+		"fileTypes": [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".exe"],
+		"rootMarkers": [
+			"CMakeLists.txt",
+			"Makefile",
+			"compile_commands.json",
+			"*.sln",
+			"*.vcxproj"
+		],
+		"launchDefaults": {
+			"request": "launch",
+			"stopAtEntry": true
+		},
+		"attachDefaults": {
+			"request": "attach"
+		}
 	}
 }

@@ -110,7 +110,9 @@ const debugSchema = type({
 	action: debugActionSchema,
 	"program?": type("string").describe("debug target path; Delve accepts Go package directories"),
 	"args?": type("string[]").describe("program arguments"),
-	"adapter?": type("string").describe("configured adapter id (gdb, lldb-dap, debugpy, dlv, rdbg, or dap.json entry)"),
+	"adapter?": type("string").describe(
+		"configured adapter id (gdb, lldb-dap, debugpy, dlv, rdbg, dap-dbgeng, or dap.json entry)",
+	),
 	cwd: "string?",
 	"file?": type("string").describe("source file"),
 	"line?": type("number").describe("source line"),
@@ -506,6 +508,8 @@ const ADAPTER_UNAVAILABLE_MESSAGES: Readonly<Record<string, string>> = {
 	rdbg: "adapter 'rdbg' is not available: install with 'gem install debug'",
 	"js-debug-adapter":
 		"adapter 'js-debug-adapter' is not available: download it from https://github.com/microsoft/vscode-js-debug",
+	"dap-dbgeng":
+		"adapter 'dap-dbgeng' is not available: install dap-dbgeng (https://github.com/svnscha/dap-dbgeng or VS Marketplace svnscha.vscode-dap-dbgeng), put dap-dbgeng on PATH, and ensure Debugging Tools for Windows (dbgeng.dll) is installed",
 };
 
 const ADAPTER_CANONICAL_COMMANDS: Readonly<Record<string, string>> = {
@@ -513,6 +517,7 @@ const ADAPTER_CANONICAL_COMMANDS: Readonly<Record<string, string>> = {
 	dlv: "dlv",
 	rdbg: "rdbg",
 	"js-debug-adapter": "js-debug-adapter",
+	"dap-dbgeng": "dap-dbgeng",
 };
 
 function formatAdapterUnavailable(adapterName: string, command: string, cwd: string): string {
@@ -704,6 +709,10 @@ export class DebugTool implements AgentTool<typeof debugSchema, DebugToolDetails
 		{
 			caption: "Launch a Python script with debugpy",
 			call: { action: "launch", adapter: "debugpy", program: "scripts/job.py", args: ["--flag"] },
+		},
+		{
+			caption: "Launch a Windows native executable with dap-dbgeng",
+			call: { action: "launch", adapter: "dap-dbgeng", program: "build/Debug/app.exe" },
 		},
 		{
 			caption: "Raw debugger command through repl",

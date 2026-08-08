@@ -7,6 +7,7 @@ import {
 	getAdapterConfigs,
 	type LaunchAdapterSelection,
 	resolveAdapter,
+	selectAttachAdapter,
 	selectLaunchAdapter,
 } from "../../src/dap/config";
 import type { DapResolvedAdapter } from "../../src/dap/types";
@@ -59,6 +60,28 @@ function requireSelectedAdapter(selection: LaunchAdapterSelection): DapResolvedA
 		throw new Error(`Expected an available adapter, received '${selection.kind}'`);
 	}
 	return selection.adapter;
+}
+
+function withPlatform<T>(platform: NodeJS.Platform, fn: () => T): T {
+	const original = process.platform;
+	Object.defineProperty(process, "platform", { value: platform, configurable: true });
+	try {
+		return fn();
+	} finally {
+		Object.defineProperty(process, "platform", { value: original, configurable: true });
+	}
+}
+
+async function writeNativeAdapterOverrides(
+	cwd: string,
+	adapters: Record<string, string>,
+): Promise<void> {
+	const body: Record<string, { command: string; fileTypes?: string[]; rootMarkers?: string[] }> = {};
+	for (const [name, command] of Object.entries(adapters)) {
+		body[name] = { command };
+	}
+	// Preserve built-in fileTypes/languages via partial merge; only override command.
+	await fs.writeFile(path.join(cwd, "dap.json"), JSON.stringify({ adapters: body }));
 }
 
 afterEach(async () => {
@@ -336,5 +359,113 @@ describe("DAP adapter configuration", () => {
 		await writeExecutable(command);
 		const selected = requireSelectedAdapter(selectLaunchAdapter(program, cwd));
 		expect(selected.resolvedCommand).toBe(command);
+	});
+
+	it("registers built-in dap-dbgeng with Windows-oriented defaults", () => {
+		const dbgeng = getAdapterConfigs()["dap-dbgeng"];
+		expect(dbgeng).toBeDefined();
+		expect(dbgeng?.command).toBe("dap-dbgeng");
+		expect(dbgeng?.args ?? []).toEqual([]);
+		expect(dbgeng?.languages).toEqual(["c", "cpp"]);
+		expect(dbgeng?.fileTypes).toEqual(
+			expect.arrayContaining([".c", ".cpp", ".exe", ".h", ".hpp"]),
+		);
+		expect(dbgeng?.rootMarkers).toEqual(
+			expect.arrayContaining(["CMakeLists.txt", "compile_commands.json", "*.sln", "*.vcxproj"]),
+		);
+		expect(dbgeng?.launchDefaults).toMatchObject({
+			request: "launch",
+			stopAtEntry: true,
+		});
+		expect(dbgeng?.launchDefaults).not.toHaveProperty("stopOnEntry");
+		expect(dbgeng?.attachDefaults).toMatchObject({ request: "attach" });
+	});
+
+	it("prefers dap-dbgeng for .exe launch on win32 when available", async () => {
+		const cwd = await makeTempDir("omp-dap-dbgeng-exe-");
+		const dbgengCmd = path.join(cwd, "tools", process.platform === "win32" ? "dap-dbgeng.cmd" : "dap-dbgeng");
+		const gdbCmd = path.join(cwd, "tools", process.platform === "win32" ? "gdb.cmd" : "gdb");
+		await writeExecutable(dbgengCmd);
+		await writeExecutable(gdbCmd);
+		await writeNativeAdapterOverrides(cwd, {
+			"dap-dbgeng": dbgengCmd,
+			gdb: gdbCmd,
+			"lldb-dap": path.join(cwd, "tools", "missing-lldb"),
+		});
+		const program = path.join(cwd, "app.exe");
+		await fs.writeFile(program, "");
+
+		const selected = withPlatform("win32", () =>
+			requireSelectedAdapter(selectLaunchAdapter(program, cwd)),
+		);
+		expect(selected.name).toBe("dap-dbgeng");
+		expect(selected.resolvedCommand).toBe(dbgengCmd);
+	});
+
+	it("does not force dap-dbgeng ahead of gdb for extensionless binaries on non-win32", async () => {
+		const cwd = await makeTempDir("omp-dap-dbgeng-nonwin-");
+		const dbgengCmd = path.join(cwd, "tools", process.platform === "win32" ? "dap-dbgeng.cmd" : "dap-dbgeng");
+		const gdbCmd = path.join(cwd, "tools", process.platform === "win32" ? "gdb.cmd" : "gdb");
+		await writeExecutable(dbgengCmd);
+		await writeExecutable(gdbCmd);
+		await writeNativeAdapterOverrides(cwd, {
+			"dap-dbgeng": dbgengCmd,
+			gdb: gdbCmd,
+			"lldb-dap": path.join(cwd, "tools", "missing-lldb"),
+		});
+		const program = path.join(cwd, "a.out");
+		await writeExecutable(program);
+
+		const selected = withPlatform("linux", () =>
+			requireSelectedAdapter(selectLaunchAdapter(program, cwd)),
+		);
+		// Prefer gdb over dap-dbgeng when both available on non-win32; do not force dbgeng first.
+		expect(selected.name).not.toBe("dap-dbgeng");
+		expect(selected.name).toBe("gdb");
+	});
+
+	it("prefers dap-dbgeng for PID attach on win32 when no port is given", async () => {
+		const cwd = await makeTempDir("omp-dap-dbgeng-attach-");
+		const dbgengCmd = path.join(cwd, "tools", process.platform === "win32" ? "dap-dbgeng.cmd" : "dap-dbgeng");
+		const gdbCmd = path.join(cwd, "tools", process.platform === "win32" ? "gdb.cmd" : "gdb");
+		await writeExecutable(dbgengCmd);
+		await writeExecutable(gdbCmd);
+		await writeNativeAdapterOverrides(cwd, {
+			"dap-dbgeng": dbgengCmd,
+			gdb: gdbCmd,
+		});
+
+		const selected = withPlatform("win32", () => selectAttachAdapter(cwd));
+		expect(selected?.name).toBe("dap-dbgeng");
+	});
+
+	it("keeps debugpy preference for attach when a port is provided on win32", async () => {
+		const cwd = await makeTempDir("omp-dap-dbgeng-attach-port-");
+		const dbgengCmd = path.join(cwd, "tools", process.platform === "win32" ? "dap-dbgeng.cmd" : "dap-dbgeng");
+		const debugpyCmd = path.join(cwd, "tools", process.platform === "win32" ? "python.cmd" : "python");
+		await writeExecutable(dbgengCmd);
+		await writeExecutable(debugpyCmd);
+		await writeNativeAdapterOverrides(cwd, {
+			"dap-dbgeng": dbgengCmd,
+			debugpy: debugpyCmd,
+		});
+
+		const selected = withPlatform("win32", () => selectAttachAdapter(cwd, undefined, 5678));
+		expect(selected?.name).toBe("debugpy");
+	});
+
+	it("reports explicit dap-dbgeng unavailable instead of falling back", async () => {
+		const cwd = await makeTempDir("omp-dap-dbgeng-missing-");
+		const missing = path.join(cwd, "tools", "dap-dbgeng-missing");
+		await writeNativeAdapterOverrides(cwd, { "dap-dbgeng": missing });
+		const program = path.join(cwd, "app.exe");
+		await fs.writeFile(program, "");
+
+		const selection = selectLaunchAdapter(program, cwd, "dap-dbgeng");
+		expect(selection).toEqual({
+			kind: "unavailable",
+			adapterName: "dap-dbgeng",
+			command: missing,
+		});
 	});
 });

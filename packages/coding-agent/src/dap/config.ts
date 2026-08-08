@@ -9,7 +9,11 @@ import { hasRootMarkers, resolveCommand } from "../lsp/config";
 import DEFAULTS from "./defaults.json" with { type: "json" };
 import type { DapAdapterConfig, DapResolvedAdapter } from "./types";
 
-const EXTENSIONLESS_DEBUGGER_ORDER: readonly string[] = ["gdb", "lldb-dap"];
+function getExtensionlessDebuggerOrder(): readonly string[] {
+	return process.platform === "win32"
+		? ["dap-dbgeng", "lldb-dap", "gdb"]
+		: ["gdb", "lldb-dap"];
+}
 const JS_DEBUG_SERVER_ENV = "JS_DEBUG_DAP_SERVER";
 const DAP_PORT_ARGUMENT = "$" + "{port}";
 
@@ -360,7 +364,7 @@ function selectAutomaticLaunchAdapter(
 			rootMatches.push(candidate);
 			if (config.acceptsDirectoryProgram === true) directoryMatches.push(candidate);
 		}
-		if (!EXTENSIONLESS_DEBUGGER_ORDER.includes(name) && !rootDir) continue;
+		if (!getExtensionlessDebuggerOrder().includes(name) && !rootDir) continue;
 		const adapter = resolveAdapterForLaunch(name, configs, cwd, rootDir);
 		if (adapter) available.push(adapter);
 	}
@@ -404,8 +408,9 @@ function sortAdaptersForLaunch(
 		if (left.hasRootMatch !== right.hasRootMatch) {
 			return left.hasRootMatch ? -1 : 1;
 		}
-		const leftRank = EXTENSIONLESS_DEBUGGER_ORDER.indexOf(left.adapter.name);
-		const rightRank = EXTENSIONLESS_DEBUGGER_ORDER.indexOf(right.adapter.name);
+		const order = getExtensionlessDebuggerOrder();
+		const leftRank = order.indexOf(left.adapter.name);
+		const rightRank = order.indexOf(right.adapter.name);
 		const normalizedLeftRank = leftRank === -1 ? Number.MAX_SAFE_INTEGER : leftRank;
 		const normalizedRightRank = rightRank === -1 ? Number.MAX_SAFE_INTEGER : rightRank;
 		const rankDelta = normalizedLeftRank - normalizedRightRank;
@@ -442,7 +447,7 @@ export function selectAttachAdapter(cwd: string, adapterName?: string, port?: nu
 		const debugpy = available.find(adapter => adapter.name === "debugpy");
 		if (debugpy) return debugpy;
 	}
-	for (const preferred of EXTENSIONLESS_DEBUGGER_ORDER) {
+	for (const preferred of getExtensionlessDebuggerOrder()) {
 		const match = available.find(adapter => adapter.name === preferred);
 		if (match) return match;
 	}
